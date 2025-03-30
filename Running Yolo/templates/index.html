@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Traffic Management System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background: #121212;
+            color: white;
+        }
+
+        .traffic-light {
+            width: 50px;
+            height: 150px;
+            background: black;
+            border-radius: 10px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-around;
+        }
+
+        .light {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: gray;
+        }
+
+        .active-red {
+            background: red;
+            box-shadow: 0 0 10px red;
+        }
+
+        .active-yellow {
+            background: yellow;
+            box-shadow: 0 0 10px yellow;
+        }
+
+        .active-green {
+            background: green;
+            box-shadow: 0 0 10px green;
+        }
+
+        .highlight {
+            border: 3px solid limegreen;
+        }
+
+        .emergency-vehicle {
+            color: #FF4500;
+        }
+
+        .normal-vehicle {
+            color: #ADD8E6;
+        }
+
+        .popup {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: #333;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .timeline {
+            height: 5px;
+            background: #333;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            width: 15px;
+            height: 15px;
+            background: #777;
+            border-radius: 50%;
+            top: -5px;
+            transform: translateX(-50%);
+            cursor: pointer;
+        }
+
+        .timeline-marker.active {
+            background: #4299e1;
+            box-shadow: 0 0 5px #4299e1;
+        }
+
+        .timestamp-display {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #4299e1;
+        }
+    </style>
+</head>
+
+<body class="flex flex-col items-center justify-center min-h-screen p-6">
+    <h2 class="text-3xl font-bold text-center text-blue-400 mb-6">Traffic Management System</h2>
+
+    <div class="w-full max-w-4xl bg-gray-900 p-6 rounded-lg shadow-lg mb-6">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-semibold text-blue-300">Current Timestamp:</h3>
+            <div id="timestamp-display" class="timestamp-display">00:00</div>
+        </div>
+
+        <div id="timeline" class="timeline">
+            <!-- Timeline markers will be added here dynamically -->
+        </div>
+
+        <div class="flex justify-between mt-2 text-xs text-gray-400">
+            <span>Start</span>
+            <span>End</span>
+        </div>
+    </div>
+
+    <div class="text-center mb-6">
+        <p class="emergency-vehicle">🚑 Emergency Vehicles get priority</p>
+        <p class="normal-vehicle">🚗 Normal Vehicles processed after emergency vehicles</p>
+    </div>
+
+    <div id="lane-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6"></div>
+
+    <div class="flex space-x-4 mb-6">
+        <button id="fetch-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg">
+            Fetch Data
+        </button>
+        <button id="start-btn" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg" disabled>
+            Start Simulation
+        </button>
+        <button id="pause-btn" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-6 rounded-lg" disabled>
+            Pause
+        </button>
+        <button id="reset-btn" class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-6 rounded-lg" disabled>
+            Reset
+        </button>
+    </div>
+
+    <div id="status-panel" class="w-full max-w-4xl bg-gray-800 p-4 rounded-lg">
+        <h3 class="text-lg font-semibold text-blue-300 mb-2">System Status</h3>
+        <div id="status-messages" class="h-32 overflow-y-auto bg-gray-900 p-3 rounded"></div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            // Initialize variables
+            let apiData = null;
+            let timestamps = [];
+            let currentTimestampIndex = 0;
+            let isProcessing = false;
+            let isPaused = false;
+            let lanes = [];
+            let timeoutId = null;
+            let currentGreenLane = null;
+
+            // DOM elements
+            const fetchBtn = document.getElementById("fetch-btn");
+            const startBtn = document.getElementById("start-btn");
+            const pauseBtn = document.getElementById("pause-btn");
+            const resetBtn = document.getElementById("reset-btn");
+            const timestampDisplay = document.getElementById("timestamp-display");
+            const statusMessages = document.getElementById("status-messages");
+            const timelineElement = document.getElementById("timeline");
+
+            // Configuration
+            const GREEN_LIGHT_DURATION = 5; // seconds
+            const YELLOW_LIGHT_DURATION = 2; // seconds
+            const MIN_CYCLE_BETWEEN_LANES = 2; // cycles
+
+            // Initialize lanes (representing videos from the API)
+            const laneNames = [
+                { id: 1, name: "Lane 1 (22.mp4)" },
+                { id: 2, name: "Lane 2 (amb_merged.mp4)" },
+                { id: 3, name: "Lane 3 (vehicles.mp4)" },
+                { id: 4, name: "Lane 4 (amb1.mp4)" }
+            ];
+
+            // Create lane cards
+            function createLaneCards() {
+                const container = document.getElementById("lane-container");
+                container.innerHTML = "";
+
+                laneNames.forEach(lane => {
+                    lanes.push({
+                        id: lane.id,
+                        name: lane.name,
+                        normalVehicles: 0,
+                        emergencyVehicles: 0,
+                        cyclesSinceLastUse: MIN_CYCLE_BETWEEN_LANES + 1, // Start with all lanes eligible
+                        priorityScore: 0
+                    });
+
+                    const laneCard = document.createElement("div");
+                    laneCard.className = "bg-gray-800 p-4 rounded-lg shadow text-center";
+                    laneCard.id = `lane-${lane.id}`;
+                    laneCard.innerHTML = `
+                        <h3 class="text-lg font-semibold text-blue-300">🛣 ${lane.name}</h3>
+                        <div class="mt-2">
+                            <label class="block text-sm normal-vehicle">Normal Vehicles</label>
+                            <div id="normal-${lane.id}" class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded-md text-white">0</div>
+                        </div>
+                        <div class="mt-2">
+                            <label class="block text-sm emergency-vehicle">Emergency Vehicles</label>
+                            <div id="emergency-${lane.id}" class="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded-md text-white">0</div>
+                        </div>
+                        <div class="traffic-light mt-4 mx-auto">
+                            <div class="light"></div>
+                            <div class="light"></div>
+                            <div class="light"></div>
+                        </div>
+                        <div class="mt-2" id="status-${lane.id}"></div>
+                    `;
+                    container.appendChild(laneCard);
+                });
+
+                // Initialize all lanes to red
+                lanes.forEach(lane => {
+                    updateTrafficLights(lane.id, "red");
+                });
+            }
+
+            // Traffic light control functions
+            function updateTrafficLights(laneId, color) {
+                const trafficLight = document.querySelector(`#lane-${laneId} .traffic-light`);
+                if (!trafficLight) return;
+
+                const lights = trafficLight.querySelectorAll('.light');
+                lights.forEach(light => {
+                    light.className = 'light';
+                });
+
+                switch (color) {
+                    case 'red':
+                        lights[0].classList.add('active-red');
+                        break;
+                    case 'yellow':
+                        lights[1].classList.add('active-yellow');
+                        break;
+                    case 'green':
+                        lights[2].classList.add('active-green');
+                        break;
+                }
+            }
+
+            function highlightLane(laneId, highlight) {
+                const laneElement = document.getElementById(`lane-${laneId}`);
+                if (laneElement) {
+                    laneElement.classList.toggle("highlight", highlight);
+                }
+            }
+
+            function updateStatus(laneId, message, isEmergency) {
+                const statusElement = document.getElementById(`status-${laneId}`);
+                if (statusElement) {
+                    statusElement.innerHTML = `<p class="${isEmergency ? 'emergency-vehicle' : 'normal-vehicle'}">${message}</p>`;
+                }
+            }
+
+            function updateVehicleCounts(timestamp) {
+                // Reset counts for all lanes
+                lanes.forEach(lane => {
+                    lane.normalVehicles = 0;
+                    lane.emergencyVehicles = 0;
+                });
+
+                // Get data for current timestamp
+                const timestampData = apiData.results[timestamp];
+                if (!timestampData) {
+                    logStatus(`No data for timestamp ${timestamp}`);
+                    return false;
+                }
+
+                // Map file paths to lane IDs
+                const pathToLaneMap = {
+                    "./Videos/22.mp4": 1,
+                    "./Videos/amb_merged.mp4": 2,
+                    "./Videos/vehicles.mp4": 3,
+                    "./Videos/amb1.mp4": 4
+                };
+
+                // Update vehicle counts for each lane
+                let hasVehicles = false;
+                for (const [path, data] of Object.entries(timestampData)) {
+                    const laneId = pathToLaneMap[path];
+                    if (laneId) {
+                        const laneIndex = lanes.findIndex(lane => lane.id === laneId);
+                        if (laneIndex !== -1) {
+                            lanes[laneIndex].normalVehicles = data.normal || 0;
+                            lanes[laneIndex].emergencyVehicles = data.emergency || 0;
+
+                            // Update UI
+                            document.getElementById(`normal-${laneId}`).textContent = data.normal || 0;
+                            document.getElementById(`emergency-${laneId}`).textContent = data.emergency || 0;
+
+                            if (data.normal > 0 || data.emergency > 0) {
+                                hasVehicles = true;
+                            }
+                        }
+                    }
+                }
+
+                return hasVehicles;
+            }
+
+            function calculatePriorityScores() {
+                // Calculate priority scores for each lane
+                lanes.forEach(lane => {
+                    // Emergency vehicles get highest priority
+                    if (lane.emergencyVehicles > 0) {
+                        lane.priorityScore = 1000 + lane.emergencyVehicles * 100 + lane.normalVehicles;
+                    }
+                    // Lanes that haven't been used in a while get medium priority
+                    else if (lane.cyclesSinceLastUse >= MIN_CYCLE_BETWEEN_LANES) {
+                        lane.priorityScore = 500 + lane.normalVehicles;
+                    }
+                    // Other lanes get priority based on vehicle count
+                    else {
+                        lane.priorityScore = lane.normalVehicles;
+                    }
+                });
+            }
+
+            function getNextLaneToProcess() {
+                calculatePriorityScores();
+
+                // Sort lanes by priority score (descending)
+                const sortedLanes = [...lanes].sort((a, b) => b.priorityScore - a.priorityScore);
+
+                // Find the highest priority lane that has vehicles
+                for (const lane of sortedLanes) {
+                    if (lane.normalVehicles > 0 || lane.emergencyVehicles > 0) {
+                        return lane;
+                    }
+                }
+
+                // If no vehicles in any lane, return null
+                return null;
+            }
+
+            function processLane(lane) {
+                if (!lane) {
+                    moveToNextTimestamp();
+                    return;
+                }
+
+                currentGreenLane = lane.id;
+                const hasEmergency = lane.emergencyVehicles > 0;
+
+                // Update cycles since last use for all lanes
+                lanes.forEach(l => {
+                    if (l.id === lane.id) {
+                        l.cyclesSinceLastUse = 0;
+                    } else {
+                        l.cyclesSinceLastUse++;
+                    }
+                });
+
+                // Turn green light on
+                updateTrafficLights(lane.id, "green");
+                highlightLane(lane.id, true);
+
+                if (hasEmergency) {
+                    updateStatus(lane.id, `Processing Emergency Vehicles: ${lane.emergencyVehicles}`, true);
+                    logStatus(`Lane ${lane.id} processing ${lane.emergencyVehicles} emergency vehicles`);
+                } else {
+                    updateStatus(lane.id, `Processing Normal Vehicles: ${lane.normalVehicles}`, false);
+                    logStatus(`Lane ${lane.id} processing ${lane.normalVehicles} normal vehicles`);
+                }
+
+                // Set timeout for yellow light (after green duration)
+                timeoutId = setTimeout(() => {
+                    updateTrafficLights(lane.id, "yellow");
+                    updateStatus(lane.id, "Changing signal...", false);
+
+                    // Set timeout for red light (after yellow duration)
+                    timeoutId = setTimeout(() => {
+                        updateTrafficLights(lane.id, "red");
+                        highlightLane(lane.id, false);
+                        updateStatus(lane.id, "", false);
+                        currentGreenLane = null;
+
+                        if (isProcessing && !isPaused) {
+                            processNextLane();
+                        }
+                    }, YELLOW_LIGHT_DURATION * 1000);
+                }, GREEN_LIGHT_DURATION * 1000);
+            }
+
+            function processNextLane() {
+                const nextLane = getNextLaneToProcess();
+
+                if (nextLane) {
+                    processLane(nextLane);
+                } else {
+                    // No vehicles in any lane at this timestamp
+                    moveToNextTimestamp();
+                }
+            }
+
+            function moveToNextTimestamp() {
+                currentTimestampIndex++;
+
+                if (currentTimestampIndex >= timestamps.length) {
+                    logStatus("Simulation complete - all timestamps processed");
+                    resetSimulation();
+                    showPopup("Simulation complete!");
+                    return;
+                }
+
+                const nextTimestamp = timestamps[currentTimestampIndex];
+                updateTimestampDisplay(nextTimestamp);
+                updateTimelineMarkers();
+
+                // Update vehicle counts for new timestamp
+                const hasVehicles = updateVehicleCounts(nextTimestamp);
+                if (!hasVehicles) {
+                    logStatus(`No vehicles at timestamp ${nextTimestamp}, moving to next timestamp`);
+                    moveToNextTimestamp();
+                    return;
+                }
+
+                // Process the new timestamp
+                processNextLane();
+            }
+
+            function updateTimestampDisplay(timestamp) {
+                timestampDisplay.textContent = timestamp;
+            }
+
+            function createTimelineMarkers() {
+                timelineElement.innerHTML = "";
+
+                timestamps.forEach((timestamp, index) => {
+                    const marker = document.createElement("div");
+                    marker.className = "timeline-marker";
+                    marker.title = timestamp;
+                    marker.style.left = `${(index / (timestamps.length - 1)) * 100}%`;
+
+                    marker.addEventListener("click", () => {
+                        if (!isProcessing || isPaused) {
+                            jumpToTimestamp(index);
+                        }
+                    });
+
+                    timelineElement.appendChild(marker);
+                });
+
+                updateTimelineMarkers();
+            }
+
+            function updateTimelineMarkers() {
+                const markers = timelineElement.querySelectorAll(".timeline-marker");
+                markers.forEach((marker, index) => {
+                    marker.classList.toggle("active", index === currentTimestampIndex);
+                });
+            }
+
+            function jumpToTimestamp(index) {
+                // Clear any pending timeouts
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+
+                // Reset all lanes to red
+                lanes.forEach(lane => {
+                    updateTrafficLights(lane.id, "red");
+                    highlightLane(lane.id, false);
+                    updateStatus(lane.id, "", false);
+                });
+
+                currentTimestampIndex = index;
+                const timestamp = timestamps[currentTimestampIndex];
+                updateTimestampDisplay(timestamp);
+                updateTimelineMarkers();
+                updateVehicleCounts(timestamp);
+
+                logStatus(`Jumped to timestamp ${timestamp}`);
+            }
+
+            function logStatus(message) {
+                const timestamp = new Date().toLocaleTimeString();
+                const logEntry = document.createElement("div");
+                logEntry.className = "text-sm mb-1";
+                logEntry.textContent = `[${timestamp}] ${message}`;
+                statusMessages.appendChild(logEntry);
+                statusMessages.scrollTop = statusMessages.scrollHeight;
+            }
+
+            function showPopup(message) {
+                const popup = document.createElement("div");
+                popup.className = "popup";
+                popup.innerHTML = `<p class="text-white">${message}</p>`;
+                document.body.appendChild(popup);
+
+                setTimeout(() => {
+                    popup.remove();
+                }, 3000);
+            }
+
+            function resetSimulation() {
+                isProcessing = false;
+                isPaused = false;
+                currentTimestampIndex = 0;
+
+                // Clear any pending timeouts
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+
+                // Reset all lanes
+                lanes.forEach(lane => {
+                    lane.cyclesSinceLastUse = MIN_CYCLE_BETWEEN_LANES + 1;
+                    updateTrafficLights(lane.id, "red");
+                    highlightLane(lane.id, false);
+                    updateStatus(lane.id, "", false);
+                });
+
+                if (timestamps.length > 0) {
+                    updateTimestampDisplay(timestamps[0]);
+                    updateVehicleCounts(timestamps[0]);
+                    updateTimelineMarkers();
+                }
+
+                // Update button states
+                startBtn.disabled = !apiData;
+                pauseBtn.disabled = true;
+                resetBtn.disabled = !apiData;
+                startBtn.textContent = "Start Simulation";
+
+                logStatus("Simulation reset");
+            }
+
+            // Fetch data from API
+            fetchBtn.addEventListener("click", async () => {
+                try {
+                    logStatus("Fetching data from API...");
+
+                    // Make the API request
+                    const response = await fetch('http://localhost:5000/get_results');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    apiData = await response.json();
+
+                    // Extract timestamps and sort them
+                    timestamps = Object.keys(apiData.results).sort((a, b) => {
+                        // Convert to seconds for comparison
+                        const aMinutes = parseInt(a.split(':')[0]);
+                        const aSeconds = parseInt(a.split(':')[1]);
+                        const bMinutes = parseInt(b.split(':')[0]);
+                        const bSeconds = parseInt(b.split(':')[1]);
+
+                        return (aMinutes * 60 + aSeconds) - (bMinutes * 60 + bSeconds);
+                    });
+
+                    if (timestamps.length === 0) {
+                        logStatus("No timestamps found in data");
+                        showPopup("No data available!");
+                        return;
+                    }
+
+                    // Set initial timestamp
+                    currentTimestampIndex = 0;
+                    updateTimestampDisplay(timestamps[0]);
+                    updateVehicleCounts(timestamps[0]);
+
+                    // Create timeline markers
+                    createTimelineMarkers();
+
+                    // Enable buttons
+                    startBtn.disabled = false;
+                    resetBtn.disabled = false;
+
+                    logStatus(`Data fetched successfully. Found ${timestamps.length} timestamps.`);
+                    showPopup("Data loaded successfully!");
+
+                } catch (error) {
+                    logStatus(`Error fetching data: ${error.message}`);
+                    showPopup("Failed to fetch data. Is the API running?");
+                }
+            });
+
+            // Start simulation
+            startBtn.addEventListener("click", () => {
+                if (!apiData) return;
+
+                if (isPaused) {
+                    isPaused = false;
+                    logStatus("Simulation resumed");
+                    processNextLane();
+                } else {
+                    isProcessing = true;
+                    currentTimestampIndex = 0;
+
+                    updateTimestampDisplay(timestamps[0]);
+                    updateVehicleCounts(timestamps[0]);
+                    updateTimelineMarkers();
+
+                    logStatus("Simulation started");
+                    processNextLane();
+                }
+
+                startBtn.textContent = "Resume";
+                pauseBtn.disabled = false;
+                startBtn.disabled = true;
+            });
+
+            // Pause simulation
+            pauseBtn.addEventListener("click", () => {
+                isPaused = true;
+                logStatus("Simulation paused");
+
+                // Clear any pending timeouts
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                }
+
+                startBtn.disabled = false;
+            });
+
+            // Reset simulation
+            resetBtn.addEventListener("click", () => {
+                resetSimulation();
+            });
+
+            // Initialize the page
+            createLaneCards();
+            logStatus("System initialized. Please fetch data to begin.");
+        });
+    </script>
+</body>
+</html>

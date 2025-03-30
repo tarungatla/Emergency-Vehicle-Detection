@@ -123,6 +123,6 @@ def count_vehicles(video_path):
 
 
 # Example usage
-video_path = "./Videos/11.mp4"
+video_path = "./Videos/amb1.mp4"
 vehicle_count = count_vehicles(video_path)
 print(f"Total vehicles counted: {vehicle_count}")

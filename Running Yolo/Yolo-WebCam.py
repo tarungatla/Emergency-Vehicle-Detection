@@ -5,7 +5,7 @@ import math
 import time
 
 # Set the webcam (try changing the index if needed)
-cap = cv2.VideoCapture("./Videos/amb.mp4")  # For default webcam (0 or 1 depending on your setup)
+cap = cv2.VideoCapture("./Videos/vehicles.mp4")  # For default webcam (0 or 1 depending on your setup)
 # cap.set(3, 1280)
 # cap.set(4, 720)
 
@@ -13,8 +13,8 @@ cap = cv2.VideoCapture("./Videos/amb.mp4")  # For default webcam (0 or 1 dependi
 model = YOLO("../Yolo-Weights/best(1).pt")
 
 # Class names
-classNames = ["ambulance", "bicycle", "car", "motorbike", "train", "truck", "boat",
-              "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat"
+classNames = ["ambulance", "bicycle", "car", "motorbike",
+              "traffic light",
 
               ]
 
